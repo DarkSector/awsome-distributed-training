@@ -6,12 +6,63 @@ import os
 import re
 import sys
 import json
+import time
 import socket
+import shutil
 import pathlib
 import argparse
 import subprocess
 
 
+def check_for_time_drift() -> bool:
+    """This test compares times across all instances
+    
+    """
+    hostname = subprocess.getoutput('hostname')
+    
+    # fail fast if the user directory isn't mounted on this node
+    if not check_if_user_directory_on_fsx():
+        print(f"User directory isn't mounted on {hostname}. Please fix that first")
+        return False
+    
+    allocated_node_count = os.environ['SLURM_NNODES']
+    directory_path = pathlib.Path("~/.hyperpod_precheck_drift").expanduser()
+    directory_path.mkdir(exist_ok=True)
+    filename = str(directory_path.joinpath(f"{hostname}").resolve())
+    
+    with open(filename, "w") as file:
+        subprocess.run(["date"], stdout=file, check=True)
+        
+    time.sleep(2)
+    hosts = len(directory_path.glob("*"))
+    
+    # check if number of node files is the same as allocated nodes
+    if not allocated_node_count == hosts:
+        print(f"{allocated_node_count} nodes allocated but only {hosts} found in results directory")
+        shutil.rmtree(directory_path)
+        return False
+    
+    else:
+        # check that all times match
+        # read all files in this 
+        dates = set()
+        for file_path in directory_path.glob('*'):
+            # Check if it's a file
+            if file_path.is_file():
+                # Open and read the file
+                with file_path.open('r') as file:
+                    # Assume each file contains a single date string
+                    date_string = file.read().strip()
+                    # Add the date string to the set
+                    dates.add(date_string)
+        
+        
+        # remove directory before exiting
+        shutil.rmtree(directory_path)
+        # Assert that there's a single string in there
+        return len(dates) == 1
+        
+        
 
 def check_if_fsx_mounted():
 
@@ -275,6 +326,7 @@ if __name__ == "__main__":
         "check_slurmd_service_status",
         "check_if_user_directory_on_fsx",
         "nvidia_cli_installed",
+        "check_for_time_drift",
     ]
 
     results = {}
